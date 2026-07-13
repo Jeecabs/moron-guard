@@ -50,6 +50,9 @@ function sourceLevelFindings(command: string): RuleFinding[] {
   if (/(?:^|[;&|]\s*)(?:psql|mysql|mariadb|sqlite3|duckdb)\b[^\n]*<<[-]?\s*['"\\]?/i.test(command) && /\b(drop|truncate|delete\s+from)\b/i.test(command)) {
     findings.push(sourceFinding(command, "database.sql-heredoc", "database", "Database heredoc contains a destructive SQL statement.", "Review the SQL and add a restrictive predicate before execution."));
   }
+  if (/(?:^|[;&|]\s*)(?:psql|mysql|mariadb|sqlite3|duckdb)\b[^\n]*(?:^|\s)(?:-f|--file|--execute-file)\s+\S+/i.test(command)) {
+    findings.push(sourceFinding(command, "database.opaque-script-file", "database", "Database client executes an opaque script file that Moron Guard cannot inspect in the hot path.", "Review the file contents explicitly or run a bounded dry-run before execution."));
+  }
   if (/(?:^|[;&|]\s*)python(?:3)?\b[^\n]*<<[-]?\s*['"\\]?/i.test(command) && /(?:rmtree|os\.(?:remove|unlink)|shutil\.|subprocess\.|system\s*\()/i.test(command)) {
     findings.push(sourceFinding(command, "core.system:python-heredoc", "system", "Python heredoc contains destructive filesystem or process operations.", "Review the script separately and replace destructive operations with a dry run."));
   }
