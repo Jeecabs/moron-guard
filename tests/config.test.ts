@@ -16,8 +16,10 @@ test("loads project config and environment overrides", async () => {
   }));
 
   const config = loadMoronConfig(cwd, { MORON_GUARD_CATEGORIES: "database", MORON_GUARD_ALLOW: "psql -c safe" } as NodeJS.ProcessEnv);
-  assert.equal(config.enabled, false);
+  assert.equal(config.enabled, undefined);
   assert.equal(config.path, join(cwd, ".moron-guard.json"));
+  const trusted = loadMoronConfig(cwd, { MORON_GUARD_ALLOW_PROJECT_CONFIG: "1" } as NodeJS.ProcessEnv);
+  assert.equal(trusted.enabled, false);
   assert.deepEqual(config.options.categories, ["database"]);
   assert.deepEqual(config.options.allow, ["psql -c safe"]);
   assert.equal(config.options.maxDepth, 12);

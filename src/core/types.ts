@@ -49,6 +49,7 @@ export interface RuleFinding {
 export interface EvaluationOptions {
   context?: EvaluationContext;
   maxDepth?: number;
+  maxCommandBytes?: number;
   categories?: readonly RuleCategory[];
   allow?: readonly string[];
 }

@@ -46,8 +46,8 @@ function formatBlock(command: string, decision: Decision): string {
   ].join("\n");
 }
 
-function isBlocked(decision: Decision): boolean {
-  return decision.action !== "allow";
+function isBlocked(decision: Decision, failClosed: boolean): boolean {
+  return decision.action === "deny" || (decision.action === "error" && failClosed);
 }
 
 function notifyResult(ctx: ExtensionContext, command: string, decision: Decision): void {
@@ -60,28 +60,49 @@ function notifyResult(ctx: ExtensionContext, command: string, decision: Decision
 
 export default function moronGuardExtension(pi: ExtensionAPI): void {
   let enabled = true;
-  let config: LoadedMoronConfig = { warnings: [], options: {} };
+  let config: LoadedMoronConfig = {
+    warnings: [],
+    sources: [],
+    options: {},
+    mode: "enforce",
+    failClosed: true,
+    userBash: true,
+    maxCommandBytes: 256 * 1024,
+  };
   let guard: Guard = createGuard(config.options);
+  let errorWarningShown = false;
 
   function rebuildGuard(): void {
     guard = createGuard(config.options);
+    errorWarningShown = false;
   }
 
   function persist(): void {
     pi.appendEntry(STATE_ENTRY, { enabled });
   }
 
+  function warnOnError(ctx: ExtensionContext, decision: Decision): void {
+    if (decision.action !== "error" || errorWarningShown) return;
+    errorWarningShown = true;
+    ctx.ui.notify(`Moron Guard evaluation error; proceeding because fail-closed is off. ${decision.diagnostics[0]?.message ?? "unknown error"}`, "warning");
+  }
+
   function refreshStatus(ctx: ExtensionContext): void {
-    if (!ctx.hasUI || !enabled) {
+    if (!ctx.hasUI) return;
+    if (config.mode === "off") {
+      ctx.ui.setStatus(STATUS_KEY, `${ctx.ui.theme.fg("muted", "○")} ${ctx.ui.theme.fg("muted", "moron guard: policy off")}`);
+      return;
+    }
+    if (!enabled) {
       ctx.ui.setStatus(STATUS_KEY, undefined);
       return;
     }
-    const label = ctx.ui.theme.fg("muted", "moron guard: in-process");
-    ctx.ui.setStatus(STATUS_KEY, `${ctx.ui.theme.fg("warning", "⚠")} ${label}`);
+    const label = ctx.ui.theme.fg("muted", `moron guard: ${config.mode}`);
+    ctx.ui.setStatus(STATUS_KEY, `${ctx.ui.theme.fg(config.mode === "audit" ? "accent" : "warning", config.mode === "audit" ? "◇" : "◆")} ${label}`);
   }
 
   pi.registerCommand("moron", {
-    description: "Moron Guard. Usage: /moron on|off|status|doctor|explain <command>|rules|reload",
+    description: "Moron Guard. Usage: /moron on|off|status|doctor|explain <command>|rules|reload|clear-cache",
     getArgumentCompletions: (prefix) => {
       const items = [
         { value: "on", label: "on", description: "Enable Moron Guard" },
@@ -90,7 +111,8 @@ export default function moronGuardExtension(pi: ExtensionAPI): void {
         { value: "doctor", label: "doctor", description: "Run local guard self-checks" },
         { value: "explain ", label: "explain <command>", description: "Evaluate a command without running it" },
         { value: "rules", label: "rules", description: "List built-in rule families" },
-        { value: "reload", label: "reload", description: "Reload .moron-guard.json" },
+        { value: "reload", label: "reload", description: "Reload config" },
+        { value: "clear-cache", label: "clear-cache", description: "Clear evaluator cache" },
       ];
       const filtered = items.filter((item) => item.value.startsWith(prefix.toLowerCase()));
       return filtered.length ? filtered : null;
@@ -119,6 +141,10 @@ export default function moronGuardExtension(pi: ExtensionAPI): void {
           refreshStatus(ctx);
           ctx.ui.notify(`Moron Guard config reloaded${config.path ? `: ${config.path}` : ": defaults"}.`, "info");
         },
+        "clear-cache": () => {
+          guard.clearCache();
+          ctx.ui.notify("Moron Guard cache cleared.", "info");
+        },
         explain: () => {
           if (!rest) return ctx.ui.notify("Usage: /moron explain <command>", "warning");
           notifyResult(ctx, rest, guard.explain({ command: rest, options: { context: { cwd: ctx.cwd } } }));
@@ -133,12 +159,12 @@ export default function moronGuardExtension(pi: ExtensionAPI): void {
         status: () => {
           refreshStatus(ctx);
           const status = guard.status();
-          ctx.ui.notify(`Moron Guard: ${enabled ? "on" : "off"}\nengine: ${status.engine}/${status.implementation}\napi: ${status.apiVersion}\nparser: ${status.parser}\nconfig: ${config.path ?? "defaults"}${config.options.categories ? `\ncategories: ${config.options.categories.join(", ")}` : ""}${config.warnings.length ? `\nwarnings: ${config.warnings.join("; ")}` : ""}`, "info");
+          ctx.ui.notify(`Moron Guard: ${enabled ? "on" : "off"}\nmode: ${config.mode}\nuser_bash: ${config.userBash ? "on" : "off"}\nfail_closed: ${config.failClosed ? "on" : "off"}\nengine: ${status.engine}/${status.implementation}\napi: ${status.apiVersion}\nparser: ${status.parser}\ncache: ${status.cache?.entries ?? 0}/${status.cache?.max ?? 0} entries, ${status.cache?.hits ?? 0} hits, ${status.cache?.misses ?? 0} misses\nconfig: ${config.path ?? "defaults"}${config.options.categories ? `\ncategories: ${config.options.categories.join(", ")}` : ""}${config.warnings.length ? `\nwarnings: ${config.warnings.join("; ")}` : ""}`, "info");
         },
       };
       const handler = handlers[subcommand];
       if (handler) return await handler();
-      ctx.ui.notify("Usage: /moron on|off|status|doctor|explain <command>|rules|reload", "warning");
+      ctx.ui.notify("Usage: /moron on|off|status|doctor|explain <command>|rules|reload|clear-cache", "warning");
     },
   });
 
@@ -161,17 +187,20 @@ export default function moronGuardExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_call", async (event, ctx) => {
-    if (!enabled) return undefined;
+    if (!enabled || config.mode === "off") return undefined;
     const command = commandFromTool(event);
     if (!command) return undefined;
     const decision = guard.evaluate({ command, options: { context: { cwd: ctx.cwd } } });
-    return isBlocked(decision) ? { block: true, reason: formatBlock(command, decision) } : undefined;
+    if (config.mode === "audit") return undefined;
+    warnOnError(ctx, decision);
+    return isBlocked(decision, config.failClosed) ? { block: true, reason: formatBlock(command, decision) } : undefined;
   });
 
   pi.on("user_bash", async (event, ctx) => {
-    if (!enabled) return undefined;
-    const decision = guard.evaluate({ command: event.command, options: { context: { cwd: ctx.cwd } } });
-    if (!isBlocked(decision)) return undefined;
+    if (!enabled || !config.userBash || config.mode === "off") return undefined;
+    const decision = guard.evaluate({ command: event.command, options: { context: { cwd: event.cwd ?? ctx.cwd } } });
+    warnOnError(ctx, decision);
+    if (config.mode === "audit" || !isBlocked(decision, config.failClosed)) return undefined;
     return {
       result: {
         output: `${formatBlock(event.command, decision)}\n`,

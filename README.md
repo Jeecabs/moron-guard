@@ -54,14 +54,18 @@ Guard starts on. `/moron off` is session-scoped and deliberately explicit.
 
 ## Configuration
 
-Project config: `.moron-guard.json` in current repo. Reload with `/moron reload`.
+Project config: `.pi/moron-guard.json` in current repo (legacy `.moron-guard.json` is accepted). Global config: `~/.pi/agent/moron-guard.json`. Reload with `/moron reload`.
 
 ```json
 {
   "enabled": true,
+  "mode": "enforce",
+  "failClosed": true,
+  "userBash": true,
   "categories": ["filesystem", "git", "database"],
   "allow": ["git status"],
-  "maxDepth": 8
+  "maxDepth": 8,
+  "maxCommandBytes": 262144
 }
 ```
 
@@ -72,7 +76,11 @@ Environment overrides:
 | `MORON_GUARD_CONFIG` | Explicit config path |
 | `MORON_GUARD_CATEGORIES` | Comma-separated rule families to enable |
 | `MORON_GUARD_ALLOW` | Semicolon-separated exact normalized commands |
+| `MORON_GUARD_MODE` | `enforce`, `audit`, or `off` |
+| `MORON_GUARD_FAIL_CLOSED` | Strict boolean failure policy |
+| `MORON_GUARD_USER_BASH` | Strict boolean user `!`/`!!` interception toggle |
 | `MORON_GUARD_MAX_DEPTH` | Nested shell parse depth, bounded to 1–32 |
+| `MORON_GUARD_MAX_COMMAND_BYTES` | UTF-8 command cap, bounded to 1 KiB–1 MiB |
 
 Allowlisting is intentionally blunt and exact-match only. Moron Guard never evaluates user-supplied regexes in its hot path.
 

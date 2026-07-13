@@ -70,7 +70,8 @@ function sourceLevelFindings(command: string): RuleFinding[] {
 
 export function evaluateCommand(command: string, options: EvaluationOptions = {}): EvaluationResult {
   const context: EvaluationContext = options.context ?? {};
-  if (Buffer.byteLength(command, "utf8") > MAX_COMMAND_BYTES) {
+  const maxCommandBytes = options.maxCommandBytes ?? MAX_COMMAND_BYTES;
+  if (Buffer.byteLength(command, "utf8") > maxCommandBytes) {
     const finding = sourceFinding(command, "core.input:oversize", "system", "Command exceeds Moron Guard's bounded input size.", "Split the script into reviewed steps or use a sandboxed execution path.");
     return {
       deny: true,
@@ -78,7 +79,7 @@ export function evaluateCommand(command: string, options: EvaluationOptions = {}
       findings: [finding],
       matchedRules: [finding.ruleId],
       highestSeverity: finding.severity,
-      warnings: [`command exceeds ${MAX_COMMAND_BYTES} UTF-8 bytes`],
+      warnings: [`command exceeds ${maxCommandBytes} UTF-8 bytes`],
       normalized: "<oversize command>",
     };
   }

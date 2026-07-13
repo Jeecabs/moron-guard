@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { redactDiagnosticText } from "./diagnostics.ts";
 import { evaluateCommand } from "./core/evaluate.ts";
 import type {
@@ -57,7 +59,11 @@ export interface GuardRequest {
 export type GuardInput = string | GuardRequest;
 
 /** Default evaluator options held by a Guard instance. */
-export interface GuardOptions extends EvaluationOptions {}
+export interface GuardOptions extends EvaluationOptions {
+  cacheMax?: number;
+  cacheTtlMs?: number;
+  policyVersion?: string;
+}
 
 /** Details returned by explain, in addition to the stable Decision fields. */
 export interface Explanation extends Decision {
@@ -82,9 +88,12 @@ export interface GuardStatus {
   maxDepth: number;
   capabilities: readonly GuardStatusCapability[];
   diagnostics: readonly Diagnostic[];
+  cache?: { entries: number; hits: number; misses: number; max: number; ttlMs: number };
 }
 
 const DEFAULT_MAX_DEPTH = 8;
+const DEFAULT_CACHE_MAX = 2048;
+const DEFAULT_CACHE_TTL_MS = 1000;
 const ALL_CATEGORIES: readonly RuleCategory[] = [
   "filesystem",
   "git",
@@ -107,6 +116,10 @@ function validMaxDepth(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 32;
 }
 
+function validMaxCommandBytes(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1024 && value <= 1024 * 1024;
+}
+
 function cloneContext(context: EvaluationContext | undefined): EvaluationContext | undefined {
   if (!context) return undefined;
   return {
@@ -115,13 +128,17 @@ function cloneContext(context: EvaluationContext | undefined): EvaluationContext
   };
 }
 
-function normalizeOptions(options: EvaluationOptions = {}): GuardOptions {
+function normalizeOptions(options: GuardOptions = {}): GuardOptions {
   return {
     ...options,
     ...(options.maxDepth === undefined || validMaxDepth(options.maxDepth) ? {} : { maxDepth: DEFAULT_MAX_DEPTH }),
+    ...(options.maxCommandBytes === undefined || validMaxCommandBytes(options.maxCommandBytes) ? {} : { maxCommandBytes: 256 * 1024 }),
     categories: options.categories ? [...options.categories] : undefined,
     allow: options.allow ? [...options.allow] : undefined,
     context: cloneContext(options.context),
+    cacheMax: typeof options.cacheMax === "number" && Number.isInteger(options.cacheMax) && options.cacheMax >= 0 ? options.cacheMax : DEFAULT_CACHE_MAX,
+    cacheTtlMs: typeof options.cacheTtlMs === "number" && Number.isFinite(options.cacheTtlMs) && options.cacheTtlMs >= 0 ? options.cacheTtlMs : DEFAULT_CACHE_TTL_MS,
+    policyVersion: options.policyVersion ?? "native-default",
   };
 }
 
@@ -232,6 +249,16 @@ function explainError(input: GuardInput, decision: Decision): Explanation {
   };
 }
 
+interface CacheEntry {
+  decision: Decision;
+  expiresAt: number;
+}
+
+function cacheKey(command: string, options: GuardOptions): string {
+  const commandKey = createHash("sha256").update(command, "utf8").digest("hex");
+  return `${options.policyVersion}:${commandKey}:${options.context?.cwd ?? ""}:${JSON.stringify({ categories: options.categories, allow: options.allow, maxDepth: options.maxDepth, maxCommandBytes: options.maxCommandBytes })}`;
+}
+
 /**
  * Reusable, host-independent Moron Guard API.
  *
@@ -240,17 +267,42 @@ function explainError(input: GuardInput, decision: Decision): Explanation {
  */
 export class Guard {
   private readonly defaults: GuardOptions;
+  private readonly cache = new Map<string, CacheEntry>();
+  private cacheHits = 0;
+  private cacheMisses = 0;
 
   constructor(options: GuardOptions = {}) {
     this.defaults = normalizeOptions(options);
+  }
+
+  clearCache(): void {
+    this.cache.clear();
   }
 
   decide(input: GuardInput, options?: EvaluationOptions): Decision {
     const parsed = parseInput(input);
     if (isDecision(parsed)) return parsed;
     try {
-      const result = evaluateCommand(parsed.command, mergeOptions(this.defaults, { ...parsed.options, ...options }));
-      return decisionFromResult(result);
+      const effective = mergeOptions(this.defaults, { ...parsed.options, ...options });
+      const key = cacheKey(parsed.command, effective);
+      const now = Date.now();
+      const cached = this.cache.get(key);
+      if (cached && cached.expiresAt > now) {
+        this.cache.delete(key);
+        this.cache.set(key, cached);
+        this.cacheHits += 1;
+        return cached.decision;
+      }
+      if (cached) this.cache.delete(key);
+      this.cacheMisses += 1;
+      const result = evaluateCommand(parsed.command, effective);
+      const decision = decisionFromResult(result);
+      const max = effective.cacheMax ?? DEFAULT_CACHE_MAX;
+      if (max > 0 && effective.cacheTtlMs !== 0 && (decision.action === "allow" || decision.action === "deny")) {
+        this.cache.set(key, { decision, expiresAt: now + (effective.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS) });
+        while (this.cache.size > max) this.cache.delete(this.cache.keys().next().value!);
+      }
+      return decision;
     } catch (error) {
       return evaluationError(error);
     }
@@ -289,6 +341,13 @@ export class Guard {
       maxDepth: this.defaults.maxDepth ?? DEFAULT_MAX_DEPTH,
       capabilities: [...CAPABILITIES],
       diagnostics: [],
+      cache: {
+        entries: this.cache.size,
+        hits: this.cacheHits,
+        misses: this.cacheMisses,
+        max: this.defaults.cacheMax ?? DEFAULT_CACHE_MAX,
+        ttlMs: this.defaults.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS,
+      },
     };
   }
 }
