@@ -15,7 +15,7 @@ Every Pi `bash` tool call and user `!`/`!!` command passes through an in-process
 - rejects commands over 128 KiB UTF-8 before parsing;
 - bounds recursive parsing depth and keeps decisions deterministic.
 
-This is a guardrail, not a sandbox. A model can still write a script, invoke an unrecognized interpreter, or use an alternate execution path. Use OS/container isolation for a hard boundary.
+Malformed or opaque dynamic shell syntax returns an error decision and fails closed by default. This is a guardrail, not a sandbox: a model can still write a script, invoke an unrecognized interpreter, or use an alternate execution path. Use OS/container isolation for a hard boundary.
 
 ## Install
 

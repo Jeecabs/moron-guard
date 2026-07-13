@@ -188,11 +188,14 @@ function resultDiagnostics(result: EvaluationResult): Diagnostic[] {
 }
 
 function decisionFromResult(result: EvaluationResult): Decision {
+  const diagnostics = resultDiagnostics(result);
+  if (!result.deny && result.warnings.length > 0) diagnostics.push(errorDiagnostic("guard.unknown-syntax", "Shell syntax could not be classified safely."));
+  const action: DecisionAction = result.deny ? "deny" : result.warnings.length > 0 ? "error" : "allow";
   return {
-    action: result.deny ? "deny" : "allow",
-    enforce: result.deny,
+    action,
+    enforce: action !== "allow",
     source: "native",
-    diagnostics: resultDiagnostics(result),
+    diagnostics,
   };
 }
 

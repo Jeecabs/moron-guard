@@ -38,6 +38,19 @@ test("cache keys include cwd and expose bounded metrics", () => {
   assert.equal(guard.status().cache?.entries, 0);
 });
 
+test("malformed shell syntax fails closed as unknown", () => {
+  const decision = createGuard().decide("echo 'unterminated");
+  assert.equal(decision.action, "error");
+  assert.equal(decision.enforce, true);
+  assert.equal(decision.diagnostics.at(-1)?.code, "guard.unknown-syntax");
+});
+
+test("opaque dynamic shell scripts fail closed", () => {
+  const decision = createGuard().decide("bash -c \"$SCRIPT\"");
+  assert.equal(decision.action, "error");
+  assert.equal(decision.enforce, true);
+});
+
 test("invalid command produces host-neutral error", () => {
   const decision = createGuard().decide({ command: 42 as unknown as string });
   assert.equal(decision.action, "error");
