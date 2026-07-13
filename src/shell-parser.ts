@@ -34,6 +34,8 @@ export interface ShellParseResult {
   normalized: string;
   /** Commands found at every shell execution level. */
   commands: ShellCommand[];
+  /** Syntax/limit warnings; callers should fail closed when execution matters. */
+  warnings: string[];
 }
 
 interface ShellToken {
@@ -71,6 +73,7 @@ interface Heredoc {
 interface ScanResult {
   tokens: LexToken[];
   heredocs: Heredoc[];
+  warnings: string[];
 }
 
 interface WordEntry {
@@ -89,6 +92,7 @@ interface ParseState {
   sourceSpans: Map<number, { start: number; end: number }>;
   nextSourceId: number;
   options: Required<ShellParseOptions>;
+  warnings: string[];
 }
 
 const DEFAULT_MAX_DEPTH = 8;
@@ -280,6 +284,18 @@ function decodeWord(raw: string): string {
   return value;
 }
 
+function unclosedQuote(raw: string): "'" | '"' | undefined {
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+  for (const character of raw) {
+    if (escaped) { escaped = false; continue; }
+    if (character === "\\" && quote !== "'") { escaped = true; continue; }
+    if (quote) { if (character === quote) quote = undefined; continue; }
+    if (character === "'" || character === '"') quote = character;
+  }
+  return quote;
+}
+
 function wordToken(source: string, start: number, end: number): LexToken {
   const raw = source.slice(start, end);
   let quoted = false;
@@ -401,6 +417,7 @@ function findHeredocTerminator(
 function scanShell(source: string, start: number, end: number): ScanResult {
   const tokens: LexToken[] = [];
   const heredocs: Heredoc[] = [];
+  const warnings: string[] = [];
   const pending: Array<{ delimiter?: LexToken; operator: LexToken; stripTabs: boolean }> = [];
   let awaitingDelimiter: { operator: LexToken; stripTabs: boolean } | undefined;
   let position = start;
@@ -545,6 +562,8 @@ function scanShell(source: string, start: number, end: number): ScanResult {
       continue;
     }
     const token = wordToken(source, tokenStart, position);
+    const quote = unclosedQuote(token.raw);
+    if (quote) warnings.push(`unclosed ${quote} quote at byte ${token.start}`);
     tokens.push(token);
     if (awaitingDelimiter) {
       pending.push({ delimiter: token, operator: awaitingDelimiter.operator, stripTabs: awaitingDelimiter.stripTabs });
@@ -552,7 +571,7 @@ function scanShell(source: string, start: number, end: number): ScanResult {
     }
   }
 
-  return { tokens, heredocs };
+  return { tokens, heredocs, warnings };
 }
 
 function splitSegments(scan: ScanResult): Segment[] {
@@ -828,8 +847,12 @@ function parseScript(
   depth: number,
   sourceId: number,
 ): void {
-  if (depth > state.options.maxDepth || start > end) return;
+  if (depth > state.options.maxDepth || start > end) {
+    state.warnings.push("nested shell depth exceeded");
+    return;
+  }
   const scan = scanShell(source, start, end);
+  state.warnings.push(...scan.warnings);
   const segments = splitSegments(scan);
 
   for (const segment of segments) {
@@ -925,10 +948,11 @@ export function parseShell(source: string, options: ShellParseOptions = {}): She
     sourceSpans: new Map(),
     nextSourceId: 1,
     options: { maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH },
+    warnings: [],
   };
   parseScript(source, 0, source.length, state, "top-level", undefined, 0, 0);
   state.commands.sort((left, right) => left.start - right.start || right.end - left.end || left.origin.localeCompare(right.origin));
-  return { normalized: normalizeShellCommand(source), commands: state.commands };
+  return { normalized: normalizeShellCommand(source), commands: state.commands, warnings: [...new Set(state.warnings)] };
 }
 
 /** Extract commands directly, convenient for guards that only need argv. */

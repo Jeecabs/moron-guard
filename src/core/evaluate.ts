@@ -1,4 +1,4 @@
-import { extractShellCommands, type ShellCommand } from "../shell-parser.ts";
+import { parseShell, type ShellCommand } from "../shell-parser.ts";
 import { evaluateCommandRules } from "./rules.ts";
 import { SEVERITY_RANK, type EvaluationContext, type EvaluationOptions, type EvaluationResult, type FindingSeverity, type RuleCategory, type RuleFinding } from "./types.ts";
 
@@ -83,8 +83,12 @@ export function evaluateCommand(command: string, options: EvaluationOptions = {}
       normalized: "<oversize command>",
     };
   }
-  const parsed = extractShellCommands(command, { maxDepth: options.maxDepth });
+  const parsedResult = parseShell(command, { maxDepth: options.maxDepth });
+  const parsed = parsedResult.commands;
   const sourceAllowed = matchesPattern(command.trim(), options.allow ?? []);
+  const dynamicWarnings = /\b(?:sh|bash|zsh|dash)\b[^\n;]*\s(?:-c|--command)\s+["']?\$(?:\{|[A-Za-z_])/i.test(command)
+    ? ["opaque dynamic shell script"]
+    : [];
   const findings: RuleFinding[] = sourceAllowed
     ? []
     : sourceLevelFindings(command).filter((finding) => categoryEnabled(finding.category, options.categories));
@@ -104,7 +108,7 @@ export function evaluateCommand(command: string, options: EvaluationOptions = {}
     findings: deduped,
     matchedRules,
     highestSeverity: highestSeverity(deduped),
-    warnings: [],
+    warnings: [...new Set([...parsedResult.warnings, ...dynamicWarnings])],
     normalized: parsed.length > 0 ? parsed.map((entry) => entry.command).join(" && ") : command.trim(),
   };
 }
