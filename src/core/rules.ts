@@ -490,7 +490,3 @@ export function evaluateCommandRules(command: ShellCommand, context: EvaluationC
   ];
   return findings;
 }
-
-export function isShellExecutable(command: ShellCommand): boolean {
-  return SHELLS.has(basename(command.executable));
-}

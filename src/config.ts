@@ -16,7 +16,7 @@ const CATEGORIES: readonly RuleCategory[] = [
   "package-manager",
 ];
 
-export interface MoronConfigFile {
+interface MoronConfigFile {
   enabled?: boolean;
   categories?: string[];
   allow?: string[];

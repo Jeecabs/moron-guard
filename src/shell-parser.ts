@@ -36,7 +36,7 @@ export interface ShellParseResult {
   commands: ShellCommand[];
 }
 
-export interface ShellToken {
+interface ShellToken {
   kind: "word" | "operator";
   raw: string;
   value?: string;
@@ -936,15 +936,7 @@ export function extractShellCommands(source: string, options: ShellParseOptions 
   return parseShell(source, options).commands;
 }
 
-/** Expose lexical tokens for callers that need spans without nested metadata. */
-export function tokenizeShell(source: string): ShellToken[] {
-  return scanShell(source, 0, source.length).tokens.map(({ embedded: _embedded, ...token }) => token);
-}
-
 /** Canonicalize shell words/operators without executing expansion or data. */
 export function normalizeShellCommand(source: string): string {
   return canonicalTokens(scanShell(source, 0, source.length).tokens);
 }
-
-// Alias kept short for call sites that use parser terminology.
-export const normalizeShell = normalizeShellCommand;
