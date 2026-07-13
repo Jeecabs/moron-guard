@@ -6,6 +6,9 @@
   "additionalProperties": false,
   "properties": {
     "enabled": { "type": "boolean" },
+    "mode": { "type": "string", "enum": ["enforce", "audit", "off"] },
+    "failClosed": { "type": "boolean" },
+    "userBash": { "type": "boolean" },
     "categories": {
       "type": "array",
       "uniqueItems": true,
@@ -18,6 +21,7 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     },
-    "maxDepth": { "type": "integer", "minimum": 1, "maximum": 32 }
+    "maxDepth": { "type": "integer", "minimum": 1, "maximum": 32 },
+    "maxCommandBytes": { "type": "integer", "minimum": 1024, "maximum": 1048576 }
   }
 }

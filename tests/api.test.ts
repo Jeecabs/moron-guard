@@ -25,6 +25,19 @@ test("Guard status and explain are deterministic", () => {
   assert.equal(explanation.normalized, "git status");
 });
 
+test("cache keys include cwd and expose bounded metrics", () => {
+  const guard = createGuard({ cacheMax: 2, cacheTtlMs: 1000 });
+  guard.decide({ command: "git status", options: { context: { cwd: "/one" } } });
+  guard.decide({ command: "git status", options: { context: { cwd: "/one" } } });
+  guard.decide({ command: "git status", options: { context: { cwd: "/two" } } });
+  const cache = guard.status().cache;
+  assert.equal(cache?.hits, 1);
+  assert.equal(cache?.misses, 2);
+  assert.equal(cache?.entries, 2);
+  guard.clearCache();
+  assert.equal(guard.status().cache?.entries, 0);
+});
+
 test("invalid command produces host-neutral error", () => {
   const decision = createGuard().decide({ command: 42 as unknown as string });
   assert.equal(decision.action, "error");
