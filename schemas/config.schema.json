@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Jeecabs/moron-guard/blob/main/schemas/config.schema.json",
+  "title": "Moron Guard configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "enabled": { "type": "boolean" },
+    "categories": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["filesystem", "git", "system", "permissions", "database", "containers", "kubernetes", "cloud", "remote", "package-manager"]
+      }
+    },
+    "allow": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "maxDepth": { "type": "integer", "minimum": 1, "maximum": 32 }
+  }
+}
