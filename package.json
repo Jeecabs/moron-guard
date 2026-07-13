@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.2",
-  "description": "Personal pi extension that blocks destructive shell commands with dcg.",
+  "description": "Personal pi extension with an in-process destructive-command scanner.",
   "keywords": [
     "pi-package",
     "pi-extension",
