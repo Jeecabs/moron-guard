@@ -1,0 +1,104 @@
+import { extractShellCommands, type ShellCommand } from "../shell-parser.ts";
+import { evaluateCommandRules } from "./rules.ts";
+import { SEVERITY_RANK, type EvaluationContext, type EvaluationOptions, type EvaluationResult, type FindingSeverity, type RuleCategory, type RuleFinding } from "./types.ts";
+
+function highestSeverity(findings: readonly RuleFinding[]): FindingSeverity | undefined {
+  return findings.reduce<FindingSeverity | undefined>((highest, finding) => {
+    if (!highest || SEVERITY_RANK[finding.severity] > SEVERITY_RANK[highest]) return finding.severity;
+    return highest;
+  }, undefined);
+}
+
+function matchesPattern(command: string, patterns: readonly string[]): boolean {
+  return patterns.some((pattern) => {
+    if (pattern.startsWith("re:")) {
+      try {
+        return new RegExp(pattern.slice(3)).test(command);
+      } catch {
+        return false;
+      }
+    }
+    return pattern === command;
+  });
+}
+
+function allowedByPattern(command: ShellCommand, patterns: readonly string[]): boolean {
+  return matchesPattern(command.command, patterns);
+}
+
+function categoryEnabled(category: RuleCategory, categories: readonly RuleCategory[] | undefined): boolean {
+  return !categories || categories.includes(category);
+}
+
+function sourceFinding(command: string, ruleId: string, category: RuleCategory, message: string, remediation: string): RuleFinding {
+  return {
+    ruleId,
+    category,
+    severity: "critical",
+    confidence: "high",
+    message,
+    remediation: { message: remediation },
+    evidence: command.length > 240 ? `${command.slice(0, 237)}...` : command,
+    location: { start: 0, end: command.length },
+    command,
+    origin: "top-level",
+  };
+}
+
+function sourceLevelFindings(command: string): RuleFinding[] {
+  const findings: RuleFinding[] = [];
+  const lower = command.toLowerCase();
+  if (/\|\s*(?:sh|bash|zsh|dash)\b/.test(lower) && /(?:rm\s+-(?:[^\s]*r|[^\s]*f)|git\s+reset\s+--hard|drop\s+(?:table|database)|truncate\s+table)/i.test(command)) {
+    findings.push(sourceFinding(command, "core.shell:piped-script", "system", "Untrusted script text is being piped directly into a shell.", "Save the script, inspect it, and run it only after review."));
+  }
+  if (/\beval\b/i.test(command) && /(?:rm\s+-|git\s+reset|drop\s+|truncate\s+)/i.test(command)) {
+    findings.push(sourceFinding(command, "core.shell:eval", "system", "eval executes command text after normal parsing and can hide destructive operations.", "Avoid eval; use explicit argv and inspect the generated command."));
+  }
+  if (/(?:^|[;&|]\s*)(?:psql|mysql|mariadb|sqlite3|duckdb)\b[^\n]*<<[-]?\s*['"\\]?/i.test(command) && /\b(drop|truncate|delete\s+from)\b/i.test(command)) {
+    findings.push(sourceFinding(command, "database.sql-heredoc", "database", "Database heredoc contains a destructive SQL statement.", "Review the SQL and add a restrictive predicate before execution."));
+  }
+  if (/(?:^|[;&|]\s*)python(?:3)?\b[^\n]*<<[-]?\s*['"\\]?/i.test(command) && /(?:rmtree|os\.(?:remove|unlink)|shutil\.|subprocess\.|system\s*\()/i.test(command)) {
+    findings.push(sourceFinding(command, "core.system:python-heredoc", "system", "Python heredoc contains destructive filesystem or process operations.", "Review the script separately and replace destructive operations with a dry run."));
+  }
+  if (/^\s*git\s*\n\s*reset\s+--hard\b/i.test(command)) {
+    findings.push(sourceFinding(command, "core.git:reset-hard", "git", "A line-separated reset --hard sequence can discard working-tree changes.", "Inspect the command sequence and stash changes before resetting."));
+  }
+  if (/\b(?:timeout|watch|strace|nohup|doas|exec|command|builtin)\b[\s\S]*\brm\s+-[\w-]*r[\w-]*\s+\//i.test(command)) {
+    findings.push(sourceFinding(command, "core.filesystem:wrapped-remove", "filesystem", "A command wrapper hides a recursive removal operation.", "Inspect the wrapped command and narrow its target before execution."));
+  }
+  if (/\b(?:sh|bash|zsh|dash)\b\s+<<<\s*["']?[^\n]*(?:rm\s+-|git\s+reset\s+--hard)/i.test(command)) {
+    findings.push(sourceFinding(command, "core.shell:here-string", "system", "A shell here-string contains a destructive command.", "Inspect the here-string contents before passing them to a shell."));
+  }
+  if (/\bcurl\b[\s\S]*\|\s*(?:sh|bash|zsh)\b/i.test(command)) {
+    findings.push(sourceFinding(command, "core.shell:install-pipe", "system", "A remote response is being executed directly by a shell.", "Download the script, inspect it, and execute a pinned local copy."));
+  }
+  return findings;
+}
+
+export function evaluateCommand(command: string, options: EvaluationOptions = {}): EvaluationResult {
+  const context: EvaluationContext = options.context ?? {};
+  const parsed = extractShellCommands(command, { maxDepth: options.maxDepth });
+  const sourceAllowed = matchesPattern(command.trim(), options.allow ?? []);
+  const findings: RuleFinding[] = sourceAllowed
+    ? []
+    : sourceLevelFindings(command).filter((finding) => categoryEnabled(finding.category, options.categories));
+
+  for (const shellCommand of parsed) {
+    if (allowedByPattern(shellCommand, options.allow ?? [])) continue;
+    for (const finding of evaluateCommandRules(shellCommand, context)) {
+      if (categoryEnabled(finding.category, options.categories)) findings.push(finding);
+    }
+  }
+
+  const deduped = [...new Map(findings.map((finding) => [`${finding.ruleId}:${finding.location?.start}:${finding.location?.end}`, finding])).values()];
+  const matchedRules = [...new Set(deduped.map((finding) => finding.ruleId))];
+  return {
+    deny: deduped.length > 0,
+    allowed: deduped.length === 0,
+    findings: deduped,
+    matchedRules,
+    highestSeverity: highestSeverity(deduped),
+    warnings: [],
+    normalized: parsed.length > 0 ? parsed.map((entry) => entry.command).join(" && ") : command.trim(),
+  };
+}
