@@ -42,6 +42,7 @@ Reload after edits:
 
 ```text
 /moron status
+/moron doctor
 /moron rules
 /moron explain git reset --hard HEAD
 /moron reload
@@ -89,6 +90,20 @@ Allowlisting is intentionally blunt and exact-match only. Moron Guard never eval
 - `package-manager`: forced cache/store pruning and published package removal
 
 Rule IDs are stable enough for diagnostics and future policy configuration. New packs should add adversarial fixtures before activation.
+
+## Host-independent API
+
+The native engine is reusable without Pi:
+
+```ts
+import { createGuard } from "moron-guard";
+
+const guard = createGuard({ context: { cwd: process.cwd() } });
+const decision = guard.evaluate("git reset --hard HEAD");
+if (decision.enforce) throw new Error("blocked");
+```
+
+Stable result fields: `action`, `enforce`, `source`, `diagnostics`. Diagnostics redact command evidence and include stable rule IDs.
 
 ## Testing philosophy
 

@@ -5,6 +5,28 @@
   "type": "module",
   "packageManager": "pnpm@10.28.2",
   "description": "Personal pi extension with an in-process destructive-command scanner.",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jeecabs/moron-guard.git"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "schemas",
+    "package.json",
+    "tsconfig.json"
+  ],
+  "exports": {
+    ".": "./src/api.ts",
+    "./core": "./src/core/index.ts",
+    "./diagnostics": "./src/diagnostics.ts"
+  },
   "keywords": [
     "pi-package",
     "pi-extension",

@@ -1,12 +1,11 @@
+// fallow-ignore-file unused-file
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+import { createGuard, type Decision, type Diagnostic, type Guard } from "./api.ts";
 import { loadMoronConfig, type LoadedMoronConfig } from "./config.ts";
-import { evaluateCommand } from "./core/index.ts";
-import type { EvaluationResult, RuleFinding } from "./core/index.ts";
 
 const STATE_ENTRY = "moron-guard-state";
 const STATUS_KEY = "moron-guard";
-const DEFAULT_MAX_FINDINGS = 4;
 
 interface PersistedState {
   enabled?: unknown;
@@ -29,17 +28,17 @@ function restoreEnabled(ctx: ExtensionContext, fallback = true): boolean {
 }
 
 
-function formatFinding(finding: RuleFinding): string {
-  return `- ${finding.ruleId} [${finding.severity}/${finding.confidence}]: ${finding.message}\n  safer: ${finding.remediation.message}`;
+function formatDiagnostic(diagnostic: Diagnostic): string {
+  const remediation = diagnostic.remediation?.message ? `\n  safer: ${diagnostic.remediation.message}` : "";
+  return `- ${diagnostic.code} [${diagnostic.severity}${diagnostic.confidence ? `/${diagnostic.confidence}` : ""}]: ${diagnostic.message}${remediation}`;
 }
 
-function formatBlock(command: string, result: EvaluationResult): string {
-  const findings = result.findings.slice(0, DEFAULT_MAX_FINDINGS).map(formatFinding).join("\n");
-  const more = result.findings.length > DEFAULT_MAX_FINDINGS ? `\n- … ${result.findings.length - DEFAULT_MAX_FINDINGS} more finding(s)` : "";
+function formatBlock(command: string, decision: Decision): string {
+  const findings = decision.diagnostics.filter((diagnostic) => diagnostic.kind === "finding").slice(0, 4).map(formatDiagnostic).join("\n");
   return [
     "MORON GUARD BLOCKED COMMAND",
     "",
-    findings + more,
+    findings || "- native policy: destructive operation detected",
     "",
     `command: ${command}`,
     "",
@@ -47,21 +46,26 @@ function formatBlock(command: string, result: EvaluationResult): string {
   ].join("\n");
 }
 
-function evaluate(command: string, ctx: ExtensionContext, config: LoadedMoronConfig): EvaluationResult {
-  return evaluateCommand(command, { ...config.options, context: { cwd: ctx.cwd } });
+function isBlocked(decision: Decision): boolean {
+  return decision.action !== "allow";
 }
 
-function notifyResult(ctx: ExtensionContext, command: string, result: EvaluationResult): void {
-  if (!result.deny) {
+function notifyResult(ctx: ExtensionContext, command: string, decision: Decision): void {
+  if (decision.action === "allow") {
     ctx.ui.notify("Moron Guard: allowed.", "info");
     return;
   }
-  ctx.ui.notify(formatBlock(command, result), "warning");
+  ctx.ui.notify(decision.action === "deny" ? formatBlock(command, decision) : `Moron Guard error: ${decision.diagnostics[0]?.message ?? "evaluation failed"}`, decision.action === "deny" ? "warning" : "error");
 }
 
 export default function moronGuardExtension(pi: ExtensionAPI): void {
   let enabled = true;
   let config: LoadedMoronConfig = { warnings: [], options: {} };
+  let guard: Guard = createGuard(config.options);
+
+  function rebuildGuard(): void {
+    guard = createGuard(config.options);
+  }
 
   function persist(): void {
     pi.appendEntry(STATE_ENTRY, { enabled });
@@ -77,12 +81,13 @@ export default function moronGuardExtension(pi: ExtensionAPI): void {
   }
 
   pi.registerCommand("moron", {
-    description: "Moron Guard. Usage: /moron on|off|status|explain <command>|rules|reload",
+    description: "Moron Guard. Usage: /moron on|off|status|doctor|explain <command>|rules|reload",
     getArgumentCompletions: (prefix) => {
       const items = [
         { value: "on", label: "on", description: "Enable Moron Guard" },
         { value: "off", label: "off", description: "Disable Moron Guard for this session" },
         { value: "status", label: "status", description: "Show engine status" },
+        { value: "doctor", label: "doctor", description: "Run local guard self-checks" },
         { value: "explain ", label: "explain <command>", description: "Evaluate a command without running it" },
         { value: "rules", label: "rules", description: "List built-in rule families" },
         { value: "reload", label: "reload", description: "Reload .moron-guard.json" },
@@ -95,60 +100,59 @@ export default function moronGuardExtension(pi: ExtensionAPI): void {
       const splitAt = trimmed.search(/\s/);
       const subcommand = (splitAt < 0 ? trimmed : trimmed.slice(0, splitAt)).toLowerCase() || "status";
       const rest = splitAt < 0 ? "" : trimmed.slice(splitAt).trim();
-
-      if (subcommand === "on" || subcommand === "enable") {
-        enabled = true;
+      const setEnabled = (next: boolean, message: string, level: "info" | "warning"): void => {
+        enabled = next;
+        rebuildGuard();
         persist();
         refreshStatus(ctx);
-        ctx.ui.notify("Moron Guard on.", "info");
-        return;
-      }
-      if (subcommand === "off" || subcommand === "disable") {
-        enabled = false;
-        persist();
-        refreshStatus(ctx);
-        ctx.ui.notify("Moron Guard off. You own the blast radius.", "warning");
-        return;
-      }
-      if (subcommand === "rules") {
-        ctx.ui.notify("Built-in packs: filesystem, git, system, permissions, database, containers, kubernetes, cloud, remote.", "info");
-        return;
-      }
-      if (subcommand === "reload") {
-        config = loadMoronConfig(ctx.cwd);
-        refreshStatus(ctx);
-        ctx.ui.notify(`Moron Guard config reloaded${config.path ? `: ${config.path}` : ": defaults"}.`, "info");
-        return;
-      }
-      if (subcommand === "explain") {
-        if (!rest) {
-          ctx.ui.notify("Usage: /moron explain <command>", "warning");
-          return;
-        }
-        notifyResult(ctx, rest, evaluate(rest, ctx, config));
-        return;
-      }
-      if (subcommand === "status") {
-        refreshStatus(ctx);
-        ctx.ui.notify(
-          `Moron Guard: ${enabled ? "on" : "off"}\nengine: in-process TypeScript scanner\nparser: shell lexer + wrappers + heredocs + substitutions\nconfig: ${config.path ?? "defaults"}${config.options.categories ? `\ncategories: ${config.options.categories.join(", ")}` : ""}${config.warnings.length ? `\nwarnings: ${config.warnings.join("; ")}` : ""}`,
-          "info",
-        );
-        return;
-      }
-      ctx.ui.notify("Usage: /moron on|off|status|explain <command>|rules|reload", "warning");
+        ctx.ui.notify(message, level);
+      };
+      const handlers: Record<string, () => void | Promise<void>> = {
+        on: () => setEnabled(true, "Moron Guard on.", "info"),
+        enable: () => setEnabled(true, "Moron Guard on.", "info"),
+        off: () => setEnabled(false, "Moron Guard off. You own the blast radius.", "warning"),
+        disable: () => setEnabled(false, "Moron Guard off. You own the blast radius.", "warning"),
+        rules: () => ctx.ui.notify("Built-in packs: filesystem, git, system, permissions, database, containers, kubernetes, cloud, remote, package-manager.", "info"),
+        reload: () => {
+          config = loadMoronConfig(ctx.cwd);
+          rebuildGuard();
+          refreshStatus(ctx);
+          ctx.ui.notify(`Moron Guard config reloaded${config.path ? `: ${config.path}` : ": defaults"}.`, "info");
+        },
+        explain: () => {
+          if (!rest) return ctx.ui.notify("Usage: /moron explain <command>", "warning");
+          notifyResult(ctx, rest, guard.explain({ command: rest, options: { context: { cwd: ctx.cwd } } }));
+        },
+        doctor: () => {
+          const status = guard.status();
+          const allowed = guard.decide("git status");
+          const denied = guard.decide("git reset --hard HEAD");
+          const healthy = status.ready && allowed.action === "allow" && denied.action === "deny";
+          ctx.ui.notify([`Moron Guard doctor: ${healthy ? "healthy" : "FAILED"}`, `engine: ${status.engine}/${status.implementation}`, `safe fixture: ${allowed.action}`, `destructive fixture: ${denied.action}`, config.warnings.length ? `config warnings: ${config.warnings.join("; ")}` : "config: valid/defaults"].join("\n"), healthy ? "info" : "error");
+        },
+        status: () => {
+          refreshStatus(ctx);
+          const status = guard.status();
+          ctx.ui.notify(`Moron Guard: ${enabled ? "on" : "off"}\nengine: ${status.engine}/${status.implementation}\napi: ${status.apiVersion}\nparser: ${status.parser}\nconfig: ${config.path ?? "defaults"}${config.options.categories ? `\ncategories: ${config.options.categories.join(", ")}` : ""}${config.warnings.length ? `\nwarnings: ${config.warnings.join("; ")}` : ""}`, "info");
+        },
+      };
+      const handler = handlers[subcommand];
+      if (handler) return await handler();
+      ctx.ui.notify("Usage: /moron on|off|status|doctor|explain <command>|rules|reload", "warning");
     },
   });
 
   pi.on("session_start", async (_event, ctx) => {
     config = loadMoronConfig(ctx.cwd);
     enabled = restoreEnabled(ctx, config.enabled ?? true);
+    rebuildGuard();
     refreshStatus(ctx);
   });
 
   pi.on("session_tree", async (_event, ctx) => {
     config = loadMoronConfig(ctx.cwd);
     enabled = restoreEnabled(ctx, config.enabled ?? true);
+    rebuildGuard();
     refreshStatus(ctx);
   });
 
@@ -160,17 +164,17 @@ export default function moronGuardExtension(pi: ExtensionAPI): void {
     if (!enabled) return undefined;
     const command = commandFromTool(event);
     if (!command) return undefined;
-    const result = evaluate(command, ctx, config);
-    return result.deny ? { block: true, reason: formatBlock(command, result) } : undefined;
+    const decision = guard.evaluate({ command, options: { context: { cwd: ctx.cwd } } });
+    return isBlocked(decision) ? { block: true, reason: formatBlock(command, decision) } : undefined;
   });
 
-  pi.on("user_bash", (event, ctx) => {
+  pi.on("user_bash", async (event, ctx) => {
     if (!enabled) return undefined;
-    const result = evaluate(event.command, ctx, config);
-    if (!result.deny) return undefined;
+    const decision = guard.evaluate({ command: event.command, options: { context: { cwd: ctx.cwd } } });
+    if (!isBlocked(decision)) return undefined;
     return {
       result: {
-        output: `${formatBlock(event.command, result)}\n`,
+        output: `${formatBlock(event.command, decision)}\n`,
         exitCode: 1,
         cancelled: false,
         truncated: false,
