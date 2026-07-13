@@ -12,6 +12,7 @@ Every Pi `bash` tool call and user `!`/`!!` command passes through an in-process
 - reports typed findings with stable rule IDs, severity, confidence, evidence, remediation;
 - blocks destructive filesystem, Git, system, permission, database, container, Kubernetes, cloud, and remote operations;
 - stays dependency-free at decision time — no subprocess, network, or filesystem probe in the hot path;
+- rejects commands over 128 KiB UTF-8 before parsing;
 - bounds recursive parsing depth and keeps decisions deterministic.
 
 This is a guardrail, not a sandbox. A model can still write a script, invoke an unrecognized interpreter, or use an alternate execution path. Use OS/container isolation for a hard boundary.
@@ -69,10 +70,10 @@ Environment overrides:
 | --- | --- |
 | `MORON_GUARD_CONFIG` | Explicit config path |
 | `MORON_GUARD_CATEGORIES` | Comma-separated rule families to enable |
-| `MORON_GUARD_ALLOW` | Semicolon-separated exact normalized commands or `re:<pattern>` entries |
+| `MORON_GUARD_ALLOW` | Semicolon-separated exact normalized commands |
 | `MORON_GUARD_MAX_DEPTH` | Nested shell parse depth, bounded to 1–32 |
 
-Allowlisting is intentionally blunt. Prefer narrowing the command or adding a rule exception in source over broad regexes.
+Allowlisting is intentionally blunt and exact-match only. Moron Guard never evaluates user-supplied regexes in its hot path.
 
 ## Built-in rule families
 

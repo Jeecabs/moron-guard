@@ -2,6 +2,8 @@ import { extractShellCommands, type ShellCommand } from "../shell-parser.ts";
 import { evaluateCommandRules } from "./rules.ts";
 import { SEVERITY_RANK, type EvaluationContext, type EvaluationOptions, type EvaluationResult, type FindingSeverity, type RuleCategory, type RuleFinding } from "./types.ts";
 
+const MAX_COMMAND_BYTES = 128 * 1024;
+
 function highestSeverity(findings: readonly RuleFinding[]): FindingSeverity | undefined {
   return findings.reduce<FindingSeverity | undefined>((highest, finding) => {
     if (!highest || SEVERITY_RANK[finding.severity] > SEVERITY_RANK[highest]) return finding.severity;
@@ -10,16 +12,7 @@ function highestSeverity(findings: readonly RuleFinding[]): FindingSeverity | un
 }
 
 function matchesPattern(command: string, patterns: readonly string[]): boolean {
-  return patterns.some((pattern) => {
-    if (pattern.startsWith("re:")) {
-      try {
-        return new RegExp(pattern.slice(3)).test(command);
-      } catch {
-        return false;
-      }
-    }
-    return pattern === command;
-  });
+  return patterns.includes(command);
 }
 
 function allowedByPattern(command: ShellCommand, patterns: readonly string[]): boolean {
@@ -77,6 +70,18 @@ function sourceLevelFindings(command: string): RuleFinding[] {
 
 export function evaluateCommand(command: string, options: EvaluationOptions = {}): EvaluationResult {
   const context: EvaluationContext = options.context ?? {};
+  if (Buffer.byteLength(command, "utf8") > MAX_COMMAND_BYTES) {
+    const finding = sourceFinding(command, "core.input:oversize", "system", "Command exceeds Moron Guard's bounded input size.", "Split the script into reviewed steps or use a sandboxed execution path.");
+    return {
+      deny: true,
+      allowed: false,
+      findings: [finding],
+      matchedRules: [finding.ruleId],
+      highestSeverity: finding.severity,
+      warnings: [`command exceeds ${MAX_COMMAND_BYTES} UTF-8 bytes`],
+      normalized: "<oversize command>",
+    };
+  }
   const parsed = extractShellCommands(command, { maxDepth: options.maxDepth });
   const sourceAllowed = matchesPattern(command.trim(), options.allow ?? []);
   const findings: RuleFinding[] = sourceAllowed
