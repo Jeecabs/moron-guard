@@ -58,4 +58,5 @@ test("covers database, container, remote, and permission packs", () => {
 test("allowlist applies exact normalized command only", () => {
   assert.equal(evaluateCommand("rm -rf /tmp/build", { allow: ["rm -rf /tmp/build"] }).deny, false);
   assert.equal(evaluateCommand("rm -rf /", { allow: ["rm -rf /tmp/build"] }).deny, true);
+  assert.equal(evaluateCommand("rm -rf /", { allow: ["re:.*"] }).deny, true);
 });
