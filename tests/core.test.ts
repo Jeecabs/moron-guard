@@ -48,6 +48,7 @@ test("covers database, container, remote, and permission packs", () => {
     ["chmod -R 777 .", "core.permissions:chmod-broad"],
     ["pnpm store prune", "package-manager.pnpm-store-prune"],
     ["aws ec2 terminate-instances --instance-ids i-123", "cloud.aws-resource-delete"],
+    ["psql -f ./hidden.sql", "database.opaque-script-file"],
   ];
   for (const [command, ruleId] of cases) {
     const result = evaluateCommand(command, { context: { cwd: "/repo" } });
