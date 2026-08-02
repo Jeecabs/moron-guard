@@ -5,7 +5,7 @@ import { createGuard, type Decision, type Diagnostic, type Guard } from "./api.t
 import { loadMoronConfig, type LoadedMoronConfig } from "./config.ts";
 
 const STATE_ENTRY = "moron-guard-state";
-const STATUS_KEY = "moron-guard";
+const LEGACY_STATUS_KEY = "moron-guard";
 
 interface PersistedState {
   enabled?: unknown;
@@ -87,18 +87,10 @@ export default function moronGuardExtension(pi: ExtensionAPI): void {
     ctx.ui.notify(`Moron Guard evaluation error; proceeding because fail-closed is off. ${decision.diagnostics[0]?.message ?? "unknown error"}`, "warning");
   }
 
-  function refreshStatus(ctx: ExtensionContext): void {
+  function clearLegacyStatus(ctx: ExtensionContext): void {
     if (!ctx.hasUI) return;
-    if (config.mode === "off") {
-      ctx.ui.setStatus(STATUS_KEY, `${ctx.ui.theme.fg("muted", "○")} ${ctx.ui.theme.fg("muted", "moron guard: policy off")}`);
-      return;
-    }
-    if (!enabled) {
-      ctx.ui.setStatus(STATUS_KEY, undefined);
-      return;
-    }
-    const label = ctx.ui.theme.fg("muted", `moron guard: ${config.mode}`);
-    ctx.ui.setStatus(STATUS_KEY, `${ctx.ui.theme.fg(config.mode === "audit" ? "accent" : "warning", config.mode === "audit" ? "◇" : "◆")} ${label}`);
+    // Remove the persistent footer indicator rendered by earlier versions.
+    ctx.ui.setStatus(LEGACY_STATUS_KEY, undefined);
   }
 
   pi.registerCommand("moron", {
@@ -126,7 +118,6 @@ export default function moronGuardExtension(pi: ExtensionAPI): void {
         enabled = next;
         rebuildGuard();
         persist();
-        refreshStatus(ctx);
         ctx.ui.notify(message, level);
       };
       const handlers: Record<string, () => void | Promise<void>> = {
@@ -138,7 +129,6 @@ export default function moronGuardExtension(pi: ExtensionAPI): void {
         reload: () => {
           config = loadMoronConfig(ctx.cwd);
           rebuildGuard();
-          refreshStatus(ctx);
           ctx.ui.notify(`Moron Guard config reloaded${config.path ? `: ${config.path}` : ": defaults"}.`, "info");
         },
         "clear-cache": () => {
@@ -157,7 +147,6 @@ export default function moronGuardExtension(pi: ExtensionAPI): void {
           ctx.ui.notify([`Moron Guard doctor: ${healthy ? "healthy" : "FAILED"}`, `engine: ${status.engine}/${status.implementation}`, `safe fixture: ${allowed.action}`, `destructive fixture: ${denied.action}`, config.warnings.length ? `config warnings: ${config.warnings.join("; ")}` : "config: valid/defaults"].join("\n"), healthy ? "info" : "error");
         },
         status: () => {
-          refreshStatus(ctx);
           const status = guard.status();
           ctx.ui.notify(`Moron Guard: ${enabled ? "on" : "off"}\nmode: ${config.mode}\nuser_bash: ${config.userBash ? "on" : "off"}\nfail_closed: ${config.failClosed ? "on" : "off"}\nengine: ${status.engine}/${status.implementation}\napi: ${status.apiVersion}\nparser: ${status.parser}\ncache: ${status.cache?.entries ?? 0}/${status.cache?.max ?? 0} entries, ${status.cache?.hits ?? 0} hits, ${status.cache?.misses ?? 0} misses\nconfig: ${config.path ?? "defaults"}${config.options.categories ? `\ncategories: ${config.options.categories.join(", ")}` : ""}${config.warnings.length ? `\nwarnings: ${config.warnings.join("; ")}` : ""}`, "info");
         },
@@ -172,17 +161,18 @@ export default function moronGuardExtension(pi: ExtensionAPI): void {
     config = loadMoronConfig(ctx.cwd);
     enabled = restoreEnabled(ctx, config.enabled ?? true);
     rebuildGuard();
-    refreshStatus(ctx);
+    clearLegacyStatus(ctx);
   });
 
   pi.on("session_tree", async (_event, ctx) => {
     config = loadMoronConfig(ctx.cwd);
     enabled = restoreEnabled(ctx, config.enabled ?? true);
     rebuildGuard();
-    refreshStatus(ctx);
+    clearLegacyStatus(ctx);
   });
 
-  pi.on("session_shutdown", async () => {
+  pi.on("session_shutdown", async (_event, ctx) => {
+    clearLegacyStatus(ctx);
     persist();
   });
 
