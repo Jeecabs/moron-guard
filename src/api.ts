@@ -209,7 +209,7 @@ function evaluationError(error: unknown): Decision {
     action: "error",
     enforce: true,
     source: "native",
-    diagnostics: [errorDiagnostic("guard.evaluation-error", detail ? `Guard evaluation failed: ${detail}` : "Guard evaluation failed.")],
+    diagnostics: [errorDiagnostic("guard.evaluation-error", detail ? `Guard evaluation failed: ${redactDiagnosticText(detail)}` : "Guard evaluation failed.")],
   };
 }
 
