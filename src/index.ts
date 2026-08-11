@@ -1,8 +1,8 @@
-// fallow-ignore-file unused-file
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { createGuard, type Decision, type Diagnostic, type Guard } from "./api.ts";
 import { loadMoronConfig, type LoadedMoronConfig } from "./config.ts";
+import { safeDiagnosticCommand } from "./diagnostics.ts";
 
 const STATE_ENTRY = "moron-guard-state";
 const LEGACY_STATUS_KEY = "moron-guard";
@@ -33,14 +33,16 @@ function formatDiagnostic(diagnostic: Diagnostic): string {
   return `- ${diagnostic.code} [${diagnostic.severity}${diagnostic.confidence ? `/${diagnostic.confidence}` : ""}]: ${diagnostic.message}${remediation}`;
 }
 
-function formatBlock(command: string, decision: Decision): string {
+export function formatBlock(command: string, decision: Decision): string {
   const findings = decision.diagnostics.filter((diagnostic) => diagnostic.kind === "finding").slice(0, 4).map(formatDiagnostic).join("\n");
+  const safeCommand = safeDiagnosticCommand(command);
   return [
     "MORON GUARD BLOCKED COMMAND",
     "",
     findings || "- native policy: destructive operation detected",
     "",
-    `command: ${command}`,
+    `command: ${safeCommand.preview}`,
+    `command id: sha256:${safeCommand.digest}`,
     "",
     "Review the command. Use /moron explain <command> for details.",
   ].join("\n");

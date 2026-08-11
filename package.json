@@ -1,50 +1,85 @@
 {
   "name": "moron-guard",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.2",
-  "description": "Personal pi extension with an in-process destructive-command scanner.",
-  "license": "UNLICENSED",
+  "description": "In-process destructive-command guard for pi.",
+  "license": "MIT",
+  "author": "Lachlan Jacobs",
+  "homepage": "https://github.com/Jeecabs/moron-guard#readme",
+  "bugs": {
+    "url": "https://github.com/Jeecabs/moron-guard/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Jeecabs/moron-guard.git"
+    "url": "git+https://github.com/Jeecabs/moron-guard.git"
   },
   "engines": {
     "node": ">=22"
   },
+  "main": "./dist/api.js",
+  "types": "./dist/api.d.ts",
   "files": [
-    "src",
+    "dist",
+    "schemas",
+    "assets/moron-guard.png",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
-    "schemas",
-    "package.json",
-    "tsconfig.json"
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "RELEASING.md",
+    "SECURITY.md",
+    "SUPPORT.md"
   ],
   "exports": {
-    ".": "./src/api.ts",
-    "./core": "./src/core/index.ts",
-    "./diagnostics": "./src/diagnostics.ts"
+    ".": {
+      "types": "./dist/api.d.ts",
+      "import": "./dist/api.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./diagnostics": {
+      "types": "./dist/diagnostics.d.ts",
+      "import": "./dist/diagnostics.js"
+    },
+    "./schema": "./schemas/config.schema.json"
   },
   "keywords": [
     "pi-package",
     "pi-extension",
-    "safety"
+    "command-safety",
+    "shell",
+    "security"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
+  },
   "pi": {
     "extensions": [
-      "./src/index.ts"
-    ]
+      "./dist/index.js"
+    ],
+    "image": "https://raw.githubusercontent.com/Jeecabs/moron-guard/main/assets/moron-guard.png"
   },
   "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
     "check": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types tests/*.test.ts"
+    "test": "node --test --experimental-strip-types tests/*.test.ts",
+    "pack:check": "npm run build && node scripts/package-smoke.mjs",
+    "verify": "npm run check && npm test && npm run pack:check",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run check && npm test"
   },
-  "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.6"
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.6",
     "@types/node": "^24.3.0",
     "typescript": "^5.9.2"
   }

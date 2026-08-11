@@ -1,9 +1,20 @@
 # Changelog
 
-## 0.1.0 — 2026-07-13
+This file records notable changes to Moron Guard.
 
-- Add native in-process shell parser and destructive-command evaluator.
-- Add host-independent Guard API and Pi adapter.
-- Add project/global config layering, enforce/audit/off modes, strict env parsing, and project safety floor.
-- Add bounded LRU decision cache, cache metrics, redacted diagnostics, doctor command, and adversarial corpus.
-- Add host-independent API exports and cross-platform CI.
+## 0.1.0 — 2026-08-12
+
+### Added
+
+- Native in-process shell parser and destructive-command evaluator.
+- Host-independent Guard API and Pi extension adapter.
+- Project and global configuration, enforce/audit/off modes, strict environment parsing, and trusted-project controls.
+- Bounded decision cache, redacted diagnostics, doctor command, and adversarial security corpus.
+- Cross-platform CI, npm provenance publishing, and automated GitHub releases.
+- Public project documentation, security policy, contribution guide, support guide, and mascot asset.
+
+### Security
+
+- Fail closed on malformed or opaque dynamic shell syntax by default.
+- Restrict untrusted project configuration from weakening guard policy.
+- Redact secrets and user home paths from blocked-command output.

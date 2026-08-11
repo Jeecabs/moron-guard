@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible problem that does not expose a security vulnerability
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report practical bypasses or sensitive data here. Use the private security form in SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Moron Guard version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Node.js version, and Pi version
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Minimal reproduction
+      description: Use a synthetic command. Do not execute a destructive command.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Redacted configuration or diagnostics
+      description: Remove tokens, credentials, personal paths, and sensitive command data.

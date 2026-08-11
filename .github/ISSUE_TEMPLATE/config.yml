@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Jeecabs/moron-guard/security/advisories/new
+    about: Report vulnerabilities and practical guard bypasses privately.
+  - name: Support guide
+    url: https://github.com/Jeecabs/moron-guard/blob/main/SUPPORT.md
+    about: Read diagnostic and reporting guidance before opening an issue.

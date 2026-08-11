@@ -73,6 +73,27 @@ function merge(base: MoronConfigFile, next: MoronConfigFile): MoronConfigFile {
   };
 }
 
+function restrictProjectConfig(config: MoronConfigFile, warnings: string[]): MoronConfigFile {
+  const safeValues = [
+    ["enabled", true],
+    ["mode", "enforce"],
+    ["failClosed", true],
+    ["userBash", true],
+  ] as const;
+  const sensitiveKeys = ["categories", "allow", "maxDepth", "maxCommandBytes"] as const;
+  const accepted = safeValues.filter(([key, safeValue]) => config[key] === safeValue);
+  const rejected = safeValues
+    .filter(([key, safeValue]) => config[key] !== undefined && config[key] !== safeValue)
+    .map(([key]) => key);
+  const ignored = [...rejected, ...sensitiveKeys.filter((key) => config[key] !== undefined)];
+  const restricted = Object.fromEntries(accepted) as MoronConfigFile;
+
+  if (ignored.length > 0) {
+    warnings.push(`Project config ignored safety-sensitive fields: ${ignored.join(", ")}. Set MORON_GUARD_ALLOW_PROJECT_CONFIG=1 only for trusted projects.`);
+  }
+  return restricted;
+}
+
 export function loadMoronConfig(cwd: string, env: NodeJS.ProcessEnv = process.env): LoadedMoronConfig {
   const warnings: string[] = [];
   const sources: string[] = [];
@@ -83,32 +104,34 @@ export function loadMoronConfig(cwd: string, env: NodeJS.ProcessEnv = process.en
   const legacyProjectPath = join(cwd, ".moron-guard.json");
   let merged: MoronConfigFile = {};
   let selectedPath: string | undefined;
+  const allowProjectWeakening = boolEnv(env.MORON_GUARD_ALLOW_PROJECT_CONFIG) === true;
+  const paths = explicit
+    ? [{ path: resolve(cwd, explicit), project: false }]
+    : [
+        { path: globalPath, project: false },
+        { path: existsSync(projectPath) ? projectPath : legacyProjectPath, project: true },
+      ];
 
-  const paths = explicit ? [resolve(cwd, explicit)] : [globalPath, existsSync(projectPath) ? projectPath : legacyProjectPath];
-  for (const path of paths) {
-    if (!existsSync(path)) {
-      if (explicit) warnings.push(`Could not read MORON_GUARD_CONFIG: ${path}`);
+  for (const source of paths) {
+    if (!existsSync(source.path)) {
+      if (explicit) warnings.push(`Could not read MORON_GUARD_CONFIG: ${source.path}`);
       continue;
     }
-    const config = readJson(path);
+    const config = readJson(source.path);
     if (!config) {
-      warnings.push(`Invalid or oversized config ignored: ${path}`);
+      warnings.push(`Invalid or oversized config ignored: ${source.path}`);
       continue;
     }
-    merged = merge(merged, config);
-    sources.push(path);
-    selectedPath = path;
+    const effective = source.project && !allowProjectWeakening ? restrictProjectConfig(config, warnings) : config;
+    merged = merge(merged, effective);
+    sources.push(source.path);
+    selectedPath = source.path;
   }
 
-  const projectConfig = sources.some((path) => path === projectPath || path === legacyProjectPath);
-  const allowProjectWeakening = boolEnv(env.MORON_GUARD_ALLOW_PROJECT_CONFIG) === true;
   const envMode = modeEnv(env.MORON_GUARD_MODE);
   const configMode = modeEnv(merged.mode);
-  const mode = envMode ?? (projectConfig && !allowProjectWeakening && configMode === "off" ? "enforce" : configMode ?? "enforce");
+  const mode = envMode ?? configMode ?? "enforce";
   const configuredEnabled = typeof merged.enabled === "boolean" ? merged.enabled : undefined;
-  const enabled = projectConfig && !allowProjectWeakening ? configuredEnabled === false ? undefined : configuredEnabled : configuredEnabled;
-  if (projectConfig && configuredEnabled === false && !allowProjectWeakening) warnings.push("Project enabled=false ignored; set MORON_GUARD_ALLOW_PROJECT_CONFIG=1 to weaken policy.");
-  if (projectConfig && (configMode === "off" || merged.failClosed === false) && !allowProjectWeakening) warnings.push("Project weakening policy ignored without MORON_GUARD_ALLOW_PROJECT_CONFIG=1.");
 
   const envCategories = env.MORON_GUARD_CATEGORIES?.split(",").map((item) => item.trim());
   const categories = validCategories(envCategories ?? merged.categories);
@@ -122,14 +145,14 @@ export function loadMoronConfig(cwd: string, env: NodeJS.ProcessEnv = process.en
   const envEnabled = boolEnv(env.MORON_GUARD_ENABLED);
   const envFailClosed = boolEnv(env.MORON_GUARD_FAIL_CLOSED);
   const envUserBash = boolEnv(env.MORON_GUARD_USER_BASH);
-  const effectiveEnabled = envEnabled ?? enabled;
-  const failClosed = envFailClosed ?? (projectConfig && !allowProjectWeakening && merged.failClosed === false ? true : merged.failClosed ?? true);
+  const effectiveEnabled = envEnabled ?? configuredEnabled;
+  const failClosed = envFailClosed ?? merged.failClosed ?? true;
   const userBash = envUserBash ?? merged.userBash ?? true;
 
   for (const name of ["MORON_GUARD_BIN", "DCG_BIN", "MORON_GUARD_TIMEOUT_MS"]) {
     if (env[name]) warnings.push(`${name} is ignored; Moron Guard is in-process.`);
   }
-  for (const name of ["MORON_GUARD_ENABLED", "MORON_GUARD_MODE", "MORON_GUARD_FAIL_CLOSED", "MORON_GUARD_USER_BASH"]) {
+  for (const name of ["MORON_GUARD_ENABLED", "MORON_GUARD_MODE", "MORON_GUARD_FAIL_CLOSED", "MORON_GUARD_USER_BASH", "MORON_GUARD_ALLOW_PROJECT_CONFIG"]) {
     if (env[name] !== undefined && ((name === "MORON_GUARD_MODE" && !envMode) || (name !== "MORON_GUARD_MODE" && boolEnv(env[name]) === undefined))) warnings.push(`Invalid ${name}; safe defaults retained.`);
   }
 
