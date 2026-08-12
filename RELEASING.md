@@ -29,8 +29,9 @@ Only maintainers can publish releases. The release workflow publishes the npm pa
    pnpm audit --prod --audit-level high
    ```
 
-5. Merge the release changes into `main`.
-6. Create a signed or annotated tag that exactly matches the package version:
+5. Confirm that Git tracks the current `dist/` output. Commit it with its source changes. Git installations load these files without local build tools.
+6. Merge the release changes into `main`.
+7. Create a signed or annotated tag that exactly matches the package version:
 
    ```bash
    version="$(node -p 'require("./package.json").version')"
@@ -38,8 +39,8 @@ Only maintainers can publish releases. The release workflow publishes the npm pa
    git push origin "v${version}"
    ```
 
-7. Approve the `npm` environment deployment when GitHub requests approval.
-8. Verify the npm package, provenance statement, packed files, and generated GitHub release.
+8. Approve the `npm` environment deployment when GitHub requests approval.
+9. Verify the npm package, provenance statement, packed files, and generated GitHub release.
 
 The workflow rejects a tag that does not match `package.json`. A prerelease version publishes with the npm `next` tag. Re-running a successful release is safe only when npm reports the same version and commit.
 
