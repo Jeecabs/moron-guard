@@ -2,6 +2,12 @@
 
 This file records notable changes to Moron Guard.
 
+## Unreleased
+
+### Fixed
+
+- Allow Pi Git updates to install production dependencies without requiring TypeScript build tools.
+
 ## 0.1.0 — 2026-08-12
 
 ### Added
