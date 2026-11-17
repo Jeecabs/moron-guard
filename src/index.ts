@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, isToolCallEventType, type ToolCallEvent } from "@earendil-works/pi-coding-agent";
 
 import { createGuard, type Decision, type Diagnostic, type Guard } from "./api.ts";
 import { loadMoronConfig, type LoadedMoronConfig } from "./config.ts";
@@ -11,9 +11,10 @@ interface PersistedState {
   enabled?: unknown;
 }
 
-function commandFromTool(event: { toolName: string; input: unknown }): string | undefined {
-  if (event.toolName !== "bash" || !event.input || typeof event.input !== "object") return undefined;
-  const command = (event.input as { command?: unknown }).command;
+function commandFromTool(event: ToolCallEvent): string | undefined {
+  if (!isToolCallEventType("bash", event)) return undefined;
+  const { command } = event.input;
+  // Models can still send malformed input, so the typed shape is not a guarantee.
   return typeof command === "string" && command.trim() ? command : undefined;
 }
 
